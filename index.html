@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карамель</title>
+<style>
+:root{--c:#8a4b1f;--bg:#fbf8f3;--l:#e6dccf}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:#2b2118}
+input,select,button{font:inherit;padding:8px 10px;border:1px solid #cdbfae;border-radius:6px;background:#fff}
+button{background:var(--c);color:#fff;border:0;cursor:pointer}
+button.g{background:#fff;color:var(--c);border:1px solid var(--c)}
+button.r{background:#a33}
+.login{max-width:340px;margin:12vh auto;display:grid;gap:10px;padding:16px}
+h1{color:var(--c);margin:0}
+.app{display:flex;min-height:100vh}
+aside{width:230px;background:var(--c);color:#fff;padding:16px;flex-shrink:0}
+aside a{display:block;padding:9px 10px;border-radius:6px;color:#fff;cursor:pointer}
+aside a:hover,aside a.on{background:rgba(255,255,255,.18)}
+main{flex:1;padding:22px;overflow-x:auto}
+form.add{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}
+table{border-collapse:collapse;width:100%;background:#fff}
+th,td{border-bottom:1px solid var(--l);padding:8px;text-align:left}
+th{background:#f3ece2}
+.err{color:#a33}.ok{color:#2a7a3b}
+.card{background:#fff;border:1px solid var(--l);border-radius:8px;padding:12px;margin:8px 0}
+@media(max-width:700px){.app{flex-direction:column}aside{width:auto}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const ROLES={seller:'Продавец',manager:'Менеджер',admin:'Администратор'};
+const ALL=[['obzor','Обзор'],['kassa','Касса'],['zakazy','Заказы'],['sklad','Склад'],['ceh','Цех и сборка'],['vitrina','Витрина'],['klienty','Клиенты'],['sebestoimost','Себестоимость'],['istochniki','Источники заказов'],['ceny','Редактор цен витрины'],['polzovateli','Управление пользователями']];
+const ACC={seller:['kassa','zakazy','ceh','vitrina','klienty'],manager:['zakazy','klienty','ceh','vitrina'],admin:ALL.map(a=>a[0])};
+const STAT=['Новый','В работе','Готов','Выдан','Отменён'];
+const PAY=['Наличные','Карта','QR','Смешанная'];
+const KIND=['Продажа','Предоплата','Доплата по заказу','Сырьё','Коммуналка','Операционные расходы','Прочее'];
+// Описание модулей: [ключ, подпись, тип, варианты]
+const M={
+ klienty:{f:[['name','Имя','text'],['phone','Телефон','text']]},
+ vitrina:{f:[['name','Наименование','text'],['weight','Вес, кг','number'],['price','Цена','number'],['qty','Количество','number']]},
+ ceny:{f:[['name','Торт','text'],['p_Витрина','Витрина','number'],['p_Kaspi','Kaspi','number'],['p_Яндекс','Яндекс','number']]},
+ sklad:{f:[['name','Ингредиент','text'],['unit','Ед. изм.','text'],['stock','Остаток','number'],['price','Закупочная цена','number']]},
+ sebestoimost:{f:[['cake','Торт','ceny'],['ing','Ингредиент','sklad'],['qty','Расход на торт','number'],['cost','Себестоимость торта','number']]},
+ istochniki:{f:[['name','Источник','text'],['pct','Комиссия, %','number']]},
+ kassa:{f:[['kind','Категория','sel',KIND],['sum','Сумма (расход со знаком −)','number'],['note','Комментарий','text']],who:1},
+ zakazy:{f:[['name','Клиент','text'],['phone','Телефон','text'],['src','Канал','src'],['cake','Торт','ceny'],['pay','Оплата','sel',PAY],['r','Радиус, см','number'],['h','Высота, см','number'],['w','Вес, кг','number'],['pre','Предоплата','number'],['addr','Адрес','text']],who:1},
+ ceh:{f:[['kind','Раздел','sel',['Пекари','Сборка']],['recipe','Рецепт','text'],['w','Вес, кг','number'],['r','Радиус, см','number'],['h','Высота, см','number'],['dest','Назначение','sel',['Свободен','Заказ','Витрина']]],who:1}
+};
+const L=k=>{try{return JSON.parse(localStorage.getItem('car2_'+k))}catch(e){return null}};
+const S=(k,v)=>{try{localStorage.setItem('car2_'+k,JSON.stringify(v))}catch(e){}};
+let mem={};
+const get=k=>mem[k]??(mem[k]=L(k)??[]);
+const put=(k,v)=>{mem[k]=v;S(k,v)};
+// первый запуск
+if(!get('istochniki').length)put('istochniki',[{name:'Витрина',pct:0},{name:'Kaspi',pct:10},{name:'Яндекс',pct:20},{name:'Заказной',pct:0}]);
+let me=null,sec='',msg='';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt=n=>Number(n||0).toLocaleString('ru-RU')+' ₸';
+
+function setupView(){
+ $('#root').innerHTML=`<form class="login"><h1>Карамель</h1><div>Первый запуск: создайте аккаунт владельца (администратора)</div>
+ <input id="n" placeholder="Имя" value="Владелец"><input id="l" type="email" value="imangalishaimarddan7@gmail.com" placeholder="Почта">
+ <input id="p" type="password" placeholder="Придумайте пароль (от 6 символов)"><input id="p2" type="password" placeholder="Повторите пароль">
+ <button type="submit">Создать и войти</button><div class="err" id="m"></div></form>`;
+ $('.login').onsubmit=e=>{e.preventDefault();const p=$('#p').value;
+  if(p.length<6)return $('#m').textContent='Пароль должен быть не короче 6 символов';
+  if(p!==$('#p2').value)return $('#m').textContent='Пароли не совпадают';
+  me={login:$('#l').value.trim().toLowerCase(),name:$('#n').value||'Владелец',pass:p,role:'admin',status:'ok',owner:true};
+  put('users',[me]);sec='obzor';app()}
+}
+function loginView(reg){
+ if(!get('users').length)return setupView();
+ $('#root').innerHTML=`<form class="login" onsubmit="return "><h1>Карамель</h1><div>${reg?'Заявка на регистрацию':'Вход в систему'}</div>
+ ${reg?'<input id="n" placeholder="Имя">':'<select id="r">'+Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')+'</select>'}
+ <input id="l" placeholder="Логин"><input id="p" type="password" placeholder="Пароль">
+ <button type="submit">${reg?'Отправить заявку':'Войти'}</button><div class="err" id="m">${esc(msg)}</div>
+ <a href="#" onclick="msg='';loginView(${!reg});return false">${reg?'Уже есть аккаунт? Войти':'Нет аккаунта? Подать заявку'}</a></form>`;
+ $('.login').onsubmit=e=>{e.preventDefault();const l=$('#l').value.trim().toLowerCase(),p=$('#p').value,u=get('users');
+  if(reg){if(!l||!p||!$('#n').value)return msg='Заполните все поля',loginView(reg);
+   if(u.find(x=>x.login===l))return msg='Такой логин уже занят',loginView(reg);
+   u.push({login:l,name:$('#n').value,pass:p,role:'',status:'wait'});put('users',u);msg='Заявка отправлена. Ожидайте подтверждения администратором.';return loginView(false)}
+  const x=u.find(x=>x.login.toLowerCase()===l&&x.pass===p);
+  if(!x){msg='Неверный логин или пароль';return loginView(false)}
+  if(x.status!=='ok'){msg='Аккаунт ожидает подтверждения администратором';return loginView(false)}
+  if(x.role!==$('#r').value){msg='Выбрана неверная роль для этого аккаунта';return loginView(false)}
+  me=x;msg='';sec=ACC[me.role][0];app()};
+}
+function app(){
+ // недоступные пункты не попадают в разметку вообще
+ const nav=ALL.filter(a=>ACC[me.role].includes(a[0]));
+ $('#root').innerHTML=`<div class="app"><aside><h1 style="color:#fff">Карамель</h1><div style="margin:12px 0">${nav.map(a=>`<a class="${a[0]===sec?'on':''}" onclick="sec='${a[0]}';app()">${a[1]}</a>`).join('')}</div>
+ <div style="opacity:.85;font-size:13px">${esc(me.name)}<br>${ROLES[me.role]}</div><p><a onclick="me=null;loginView(false)">Выйти</a></p></aside><main id="v"></main></div>`;
+ if(!ACC[me.role].includes(sec))return;
+ const t=ALL.find(a=>a[0]===sec)[1];
+ $('#v').innerHTML=`<h2>${t}</h2>`+(sec==='obzor'?obzor():sec==='polzovateli'?users():crud(sec));
+}
+function opts(k){return get(k).map(x=>x.name||x.login)}
+function crud(k){
+ const m=M[k];
+ const inp=f=>{const[key,lab,t,o]=f;
+  if(t==='sel')return`<select name="${key}">${o.map(v=>`<option>${v}</option>`).join('')}</select>`;
+  if(t==='src'||t==='ceny'||t==='sklad')return`<select name="${key}"><option value="">${lab}</option>${opts(t==='src'?'istochniki':t).map(v=>`<option>${esc(v)}</option>`).join('')}</select>`;
+  return`<input name="${key}" type="${t}" placeholder="${lab}" ${t==='number'?'step="any"':''}>`};
+ const rows=get(k);
+ const canDel=me.role==='admin';
+ return`<form class="add" onsubmit="add(event,'${k}')">${m.f.map(inp).join('')}<button>Добавить</button></form>
+ <div class="err" id="e"></div><div style="overflow-x:auto"><table><tr>${m.f.map(f=>`<th>${f[1]}</th>`).join('')}${m.who?'<th>Кто</th><th>Дата</th>':''}${k==='zakazy'?'<th>Итого</th><th>Статус</th>':''}<th></th></tr>
+ ${rows.map((r,i)=>`<tr>${m.f.map(f=>`<td>${esc(r[f[0]])}</td>`).join('')}${m.who?`<td>${esc(r.who)}</td><td>${esc(r.date)}</td>`:''}${k==='zakazy'?`<td>${fmt(r.total)}${r.pre?'<br><small>предоплата '+fmt(r.pre)+'</small>':''}</td><td><select onchange="setSt(${i},this.value)">${STAT.map(s=>`<option ${s===r.st?'selected':''}>${s}</option>`).join('')}</select></td>`:''}
+ <td>${canDel?`<button class="r" onclick="del('${k}',${i})">Удалить</button>`:''}</td></tr>`).join('')||'<tr><td colspan="12">Пока пусто. Добавьте первую запись выше.</td></tr>'}</table></div>`;
+}
+function add(e,k){e.preventDefault();const fd=new FormData(e.target),r={};
+ for(const[a,b]of fd.entries())r[a]=b;
+ if(!r[M[k].f[0][0]]&&k!=='kassa')return $('#e').textContent='Заполните первое поле';
+ if(M[k].who){r.who=me.name;r.date=new Date().toLocaleString('ru-RU')}
+ if(k==='zakazy'){const c=get('ceny').find(x=>x.name===r.cake);r.total=c?Number(c['p_'+r.src])||0:0;r.st='Новый';r.pre=Number(r.pre)||0}
+ if(k==='kassa')r.sum=Number(r.sum)||0;
+ const a=get(k);a.push(r);put(k,a);
+ if(k==='zakazy'&&r.pre){const c=get('kassa');c.push({kind:'Предоплата',sum:r.pre,note:'Заказ: '+r.name,who:me.name,date:r.date});put('kassa',c)}
+ app()}
+function setSt(i,v){const a=get('zakazy');a[i].st=v;
+ if(v==='Выдан'&&!a[i].paid){a[i].paid=1;const d=a[i].total-a[i].pre;if(d>0){const c=get('kassa');c.push({kind:'Доплата по заказу',sum:d,note:'Заказ: '+a[i].name,who:me.name,date:new Date().toLocaleString('ru-RU')});put('kassa',c)}}
+ put('zakazy',a);app()}
+function del(k,i){if(!confirm('Вы уверены, что хотите удалить запись?'))return;const a=get(k);a.splice(i,1);put(k,a);app()}
+function users(){
+ return`<table><tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Статус</th><th></th></tr>${get('users').map((u,i)=>`<tr><td>${esc(u.name)}</td><td>${esc(u.login)}</td>
+ <td>${u.status==='ok'?ROLES[u.role]:`<select id="ro${i}">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>`}</td>
+ <td>${u.status==='ok'?'<span class="ok">Активен</span>':'Ожидает подтверждения'}</td>
+ <td>${u.status==='ok'?(u.owner?'':`<button class="r" onclick="ban(${i})">Отключить</button>`):`<button onclick="okU(${i})">Одобрить</button>`}</td></tr>`).join('')}</table>`}
+function okU(i){const u=get('users');u[i].role=$('#ro'+i).value;u[i].status='ok';put('users',u);app()}
+function ban(i){if(!confirm('Вы уверены?'))return;const u=get('users');u[i].status='wait';u[i].role='';put('users',u);app()}
+function obzor(){
+ const z=get('zakazy'),k=get('kassa'),by={};
+ z.forEach(o=>{(by[o.src]=by[o.src]||[]).push(o)});
+ const inc=k.filter(x=>x.sum>0).reduce((a,b)=>a+b.sum,0),exp=k.filter(x=>x.sum<0).reduce((a,b)=>a+b.sum,0);
+ return`<div class="card">Доход по кассе: <b>${fmt(inc)}</b> · Расходы: <b>${fmt(-exp)}</b> · Итог: <b>${fmt(inc+exp)}</b></div>
+ <h3>Продажи по каналам</h3>${Object.entries(by).map(([s,l])=>{const g={};l.forEach(o=>{g[o.cake]=g[o.cake]||{n:0,s:0};g[o.cake].n++;g[o.cake].s+=o.total});
+ const com=(get('istochniki').find(x=>x.name===s)||{}).pct||0,tot=l.reduce((a,b)=>a+b.total,0);
+ return`<div class="card"><b>${esc(s)}</b>: ${fmt(tot)}, комиссия ${com}% = ${fmt(tot*com/100)}<br>${Object.entries(g).map(([c,v])=>`${esc(c)} — ${v.n} шт., ${fmt(v.s)}`).join('<br>')}</div>`}).join('')||'<p>Продаж пока нет.</p>'}`}
+loginView(false);
+</script>
+</body>
+</html>
